@@ -254,13 +254,15 @@ def update_smoke_particles():
             smoke_particles.remove(particle)
             continue
         
-        # Desenhar partícula
+        # Desenhar partícula (ajustada pela câmera)
+        adjusted_particle_y = particle['y'] + camera_y
+        
         if using_smoke_image and smoke_image:
             # Usar imagem de fumaça se disponível
             # Criar superfície com transparência
             temp_surface = smoke_image.copy()
             temp_surface.set_alpha(alpha)
-            screen.blit(temp_surface, (int(particle['x'] - 8), int(particle['y'] - 8)))
+            screen.blit(temp_surface, (int(particle['x'] - 8), int(adjusted_particle_y - 8)))
         else:
             # Usar círculo se não tiver imagem - cores diferentes para pulo duplo
             if particle.get('color_type') == 'double':
@@ -269,7 +271,7 @@ def update_smoke_particles():
                 color = (200, 200, 200) if alpha > 128 else (150, 150, 150)  # Cinza para pulo normal
             
             size = max(1, int(particle['size'] * (particle['life'] / particle['max_life'])))
-            pygame.draw.circle(screen, color, (int(particle['x']), int(particle['y'])), size)
+            pygame.draw.circle(screen, color, (int(particle['x']), int(adjusted_particle_y)), size)
 
 # Função para desenhar HUD (pontuação e altura)
 def draw_hud():
@@ -474,25 +476,27 @@ while True:
     
     # Aplicar gravidade
     pig_vel_y += gravity
-    
-    # Salvar posição anterior para detecção de colisão mais precisa
-    old_pig_y = pig_y
     pig_y += pig_vel_y
     
-    # Verificar colisão com plataformas primeiro
+    # A cada quadro, primeiro assumimos que o porco não está no chão
+    # A colisão com uma plataforma ou com o solo provará o contrário
+    on_ground = False
+    
+    # Verificar colisão com plataformas
     platform_collision = check_platform_collision()
     
-    # Verificar colisão com o chão apenas se não colidiu com plataforma
-    if not platform_collision and pig_y >= ground_y:
+    # Se colidiu com uma plataforma, está no chão
+    if platform_collision:
+        on_ground = True
+    
+    # Se não colidiu com uma plataforma, verificar colisão com o chão principal
+    elif pig_y >= ground_y:
         pig_y = ground_y
         pig_vel_y = 0
         on_ground = True
         # Reset do sistema de pulo duplo quando toca o chão
         can_double_jump = False
         has_double_jumped = False
-    elif not platform_collision:
-        # Se não está em plataforma nem no chão, não está no ground
-        on_ground = False
 
     # Atualizar câmera
     update_camera()
@@ -517,20 +521,21 @@ while True:
     # Atualizar e desenhar partículas de fumaça
     update_smoke_particles()
 
-    # Desenhar porquinho
+    # Desenhar porquinho (ajustado pela câmera)
+    adjusted_pig_y = pig_y + camera_y
     if using_image and pig_image:
         # Escolher a imagem baseada na direção
         current_pig_image = pig_image if pig_facing_right else pig_image_flipped
-        screen.blit(current_pig_image, (pig_x, pig_y))
+        screen.blit(current_pig_image, (pig_x, adjusted_pig_y))
     else:
-        # Fallback para retângulo rosa se a imagem não carregar
-        pygame.draw.rect(screen, PINK, (pig_x, pig_y, pig_width, pig_height))
+        # Fallback para retângulo rosa se a imagem não carregar (ajustado pela câmera)
+        pygame.draw.rect(screen, PINK, (pig_x, adjusted_pig_y, pig_width, pig_height))
     
-    # Linha de debug: mostrar área de colisão (linha fina na base do porquinho)
+    # Linha de debug: mostrar área de colisão (ajustada pela câmera)
     if on_ground:
         pygame.draw.line(screen, (0, 255, 0), 
-                        (pig_x, pig_y + pig_height), 
-                        (pig_x + pig_width, pig_y + pig_height), 2)
+                        (pig_x, adjusted_pig_y + pig_height), 
+                        (pig_x + pig_width, adjusted_pig_y + pig_height), 2)
 
     # Desenhar controles na tela
     draw_instructions()
