@@ -1,5 +1,8 @@
 import pygame
 import sys
+import random
+import json
+import os
 
 # Inicializa o Pygame
 pygame.init()
@@ -77,7 +80,8 @@ space_was_pressed = False   # Para detectar quando a tecla foi soltada
 pig_facing_right = True
 
 # Sistema de pontuação por altura
-max_height_reached = 0
+# Carregar recorde salvo ao iniciar o jogo
+max_height_reached = 0  # Será atualizado logo abaixo
 current_height = 0
 
 # Sistema de Game Over
@@ -106,7 +110,51 @@ smoke_particles = []
 platforms = []
 last_platform_y = 0  # Controla a altura da plataforma mais alta criada
 
-import random
+# Variável para rastrear velocidade do frame anterior (para detecção de pico de subida)
+prev_vel_y = 0
+
+# Nome do arquivo para salvar o recorde
+HIGHSCORE_FILE = "highscore.json"
+
+# ===== SISTEMA DE PERSISTÊNCIA DE RECORDE =====
+def load_high_score():
+    """Carrega o recorde salvo do arquivo JSON"""
+    try:
+        if os.path.exists(HIGHSCORE_FILE):
+            with open(HIGHSCORE_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                score = data.get('high_score', 0)
+                print(f"📊 Recorde carregado: {score}m")
+                return score
+        else:
+            print("ℹ️ Nenhum recorde anterior encontrado. Comece sua jornada!")
+            return 0
+    except Exception as e:
+        print(f"⚠️ Erro ao carregar recorde: {e}")
+        return 0
+
+def save_high_score(score):
+    """Salva o novo recorde no arquivo JSON"""
+    try:
+        data = {
+            'high_score': score,
+            'last_updated': pygame.time.get_ticks(),  # Timestamp do jogo
+            'version': '1.0'
+        }
+        with open(HIGHSCORE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4)
+        print(f"💾 Novo recorde salvo: {score}m")
+        return True
+    except Exception as e:
+        print(f"❌ Erro ao salvar recorde: {e}")
+        return False
+
+def check_and_save_high_score(current_score, previous_high_score):
+    """Verifica se é um novo recorde e salva se for"""
+    if current_score > previous_high_score:
+        save_high_score(current_score)
+        return True
+    return False
 
 # Função para criar plataformas
 def create_platforms():
@@ -188,7 +236,12 @@ def reset_game():
     """Reseta todas as variáveis do jogo para o estado inicial"""
     global pig_x, pig_y, pig_vel_y, on_ground, can_double_jump, has_double_jumped
     global camera_y, camera_target_y, smoke_particles, game_over, game_over_timer
-    global fall_start_height, current_height, last_safe_y, reached_platform_this_cycle, was_on_ground_last_frame
+    global fall_start_height, current_height, last_safe_y, reached_platform_this_cycle, was_on_ground_last_frame, prev_vel_y
+    
+    # Salvar recorde atual antes de resetar (se houver progresso)
+    current_session_height = max(0, int((ground_y - pig_y) / 10))
+    if current_session_height > 0:
+        check_and_save_high_score(current_session_height, max_height_reached)
     
     # Reset da posição do porco
     pig_x, pig_y = WIDTH // 2, HEIGHT - 150
@@ -219,6 +272,7 @@ def reset_game():
     spawn_ground_spring()
     reached_platform_this_cycle = False
     was_on_ground_last_frame = True
+    prev_vel_y = 0
 
 def spawn_ground_spring():
     """Decide se haverá mola no chão e posiciona."""
@@ -577,27 +631,44 @@ def update_smoke_particles():
             size = max(1, int(particle['size'] * (particle['life'] / particle['max_life'])))
             pygame.draw.circle(screen, color, (int(particle['x']), int(adjusted_particle_y)), size)
 
+# Variável global para controlar se já salvou o recorde na sessão atual
+last_saved_score = 0
+
 # Função para desenhar HUD (pontuação e altura)
 def draw_hud():
     """Desenha informações do jogo (altura, pontuação)"""
     font_large = pygame.font.Font(None, 36)
     font_small = pygame.font.Font(None, 24)
+    font_tiny = pygame.font.Font(None, 18)
     
     # Calcular altura atual (quanto mais alto, maior o valor)
     current_height = max(0, int((ground_y - pig_y) / 10))  # Dividir por 10 para valores mais legíveis
     
-    # Atualizar altura máxima
-    global max_height_reached
+    # Atualizar altura máxima e salvar se for novo recorde
+    global max_height_reached, last_saved_score
+    previous_record = max_height_reached
+    
     if current_height > max_height_reached:
         max_height_reached = current_height
+        # Salvar automaticamente a cada 10m de progresso (para não salvar toda hora)
+        if max_height_reached - last_saved_score >= 10:
+            save_high_score(max_height_reached)
+            last_saved_score = max_height_reached
     
     # Desenhar altura atual
     height_text = font_large.render(f"Altura: {current_height}m", True, WHITE)
     screen.blit(height_text, (WIDTH - 250, 10))
     
-    # Desenhar recorde
-    record_text = font_small.render(f"Recorde: {max_height_reached}m", True, YELLOW)
+    # Desenhar recorde com indicador de novo recorde
+    is_new_record = current_height > previous_record and current_height > 0
+    record_color = (255, 215, 0) if is_new_record else YELLOW  # Dourado brilhante se for novo
+    record_text = font_small.render(f"Recorde: {max_height_reached}m", True, record_color)
     screen.blit(record_text, (WIDTH - 250, 50))
+    
+    # Mostrar indicador de novo recorde
+    if is_new_record:
+        new_record_text = font_tiny.render("🔥 NOVO RECORDE!", True, (255, 100, 100))
+        screen.blit(new_record_text, (WIDTH - 250, 75))
     
     # Indicador de progresso visual
     if current_height > 0:
@@ -733,6 +804,12 @@ def draw_key_effect():
         screen.blit(text, text_rect)
 
 # Loop principal
+# Carregar recorde salvo antes de iniciar
+print("\n" + "="*50)
+print("🐷 JOGO DO PORQUINHO - Carregando...")
+print("="*50)
+max_height_reached = load_high_score()
+
 # Inicializar o jogo em estado limpo
 reset_game()
 
@@ -744,6 +821,17 @@ while True:
         # Eventos
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                # Salvar recorde final antes de sair
+                print("\n" + "="*50)
+                print("🐷 Encerrando o jogo...")
+                current_session_height = max(0, int((ground_y - pig_y) / 10))
+                final_score = max(max_height_reached, current_session_height)
+                if final_score > load_high_score():
+                    save_high_score(final_score)
+                    print(f"🏆 Recorde final salvo: {final_score}m")
+                else:
+                    print(f"📊 Seu recorde continua sendo: {load_high_score()}m")
+                print("="*50)
                 pygame.quit()
                 sys.exit()
             if event.type == pygame.KEYDOWN:
@@ -800,14 +888,10 @@ while True:
         pig_y += pig_vel_y
         
         # Registrar pico de subida: quando a velocidade muda de negativa (subindo) para positiva (começa a cair)
-        # Precisamos de uma flag derivada do frame anterior. Simplificação: se velocidade agora > 0 e antes era <=0
-        # Armazenamos a velocidade anterior em uma variável local estática usando atributo da função (hack simples)
-        if not hasattr(pygame, '_prev_vel_y'):
-            pygame._prev_vel_y = pig_vel_y
-        if pig_vel_y > 0 and pygame._prev_vel_y <= 0:
+        if pig_vel_y > 0 and prev_vel_y <= 0:
             # Começou a cair: registrar altura máxima atingida
             fall_start_height = pig_y
-        pygame._prev_vel_y = pig_vel_y
+        prev_vel_y = pig_vel_y
     
         # A cada quadro, primeiro assumimos que o porco não está no chão
         # A colisão com uma plataforma ou com o solo provará o contrário
@@ -949,25 +1033,53 @@ while True:
         font_large = pygame.font.Font(None, 72)
         font_medium = pygame.font.Font(None, 36)
         font_small = pygame.font.Font(None, 24)
+        font_tiny = pygame.font.Font(None, 20)
+        
         game_over_text = font_large.render("GAME OVER", True, (255, 50, 50))
         game_over_rect = game_over_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 100))
         screen.blit(game_over_text, game_over_rect)
+        
         reason_text = font_medium.render(f"Queda de {int((pig_y - fall_start_height)/10)}m foi fatal!", True, WHITE)
         reason_rect = reason_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50))
         screen.blit(reason_text, reason_rect)
+        
         if game_over_timer > 60:  # (Comentário estava invertido antes, mantendo lógica existente)
             restart_text = font_small.render("Pressione ESPAÇO para recomeçar", True, YELLOW)
             restart_rect = restart_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 50))
             screen.blit(restart_text, restart_rect)
+        
+        # Verificar se bateu o recorde e salvar
+        current_session_height = max(0, int((ground_y - pig_y) / 10))
+        loaded_record = load_high_score()  # Carregar do arquivo para comparar
+        is_new_record = max_height_reached > loaded_record
+        
+        if is_new_record and game_over_timer == 179:  # Salvar apenas uma vez ao entrar em game over
+            save_high_score(max_height_reached)
+        
         stats_text = font_small.render(f"Altura máxima alcançada: {max_height_reached}m", True, LIGHT_GRAY)
         stats_rect = stats_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 100))
         screen.blit(stats_text, stats_rect)
+        
+        # Mostrar mensagem de novo recorde
+        if is_new_record:
+            record_msg = font_tiny.render("🏆 NOVO RECORDE SALVO! 🏆", True, (255, 215, 0))
+            record_rect = record_msg.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 130))
+            screen.blit(record_msg, record_rect)
         game_over_timer -= 1
         keys = pygame.key.get_pressed()
         if keys[pygame.K_SPACE] and game_over_timer <= 60:
             reset_game()
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                # Salvar recorde final antes de sair
+                print("\n" + "="*50)
+                print("🐷 Encerrando o jogo...")
+                if max_height_reached > load_high_score():
+                    save_high_score(max_height_reached)
+                    print(f"🏆 Recorde final salvo: {max_height_reached}m")
+                else:
+                    print(f"📊 Seu recorde continua sendo: {load_high_score()}m")
+                print("="*50)
                 pygame.quit()
                 sys.exit()
             if event.type == pygame.KEYDOWN and event.key == pygame.K_F3:
